@@ -327,3 +327,355 @@ GET / HTTP/1.1
 Браузер успешно отобразил полученную страницу
 
 ![Результат работы HTTP-сервера](images/http_page.png)
+
+## Задание 4. Чат на сокетах
+
+### Описание
+
+В четвёртом задании реализован многопользовательский чат с использованием библиотеки `socket`, протокола TCP и библиотеки `threading`
+
+В отличие от предыдущих заданий, сервер должен одновременно обслуживать несколько клиентов. Для этого каждое подключение обрабатывается в отдельном потоке
+
+Пользователь запускает один и тот же файл клиента, вводит своё имя и после подключения может отправлять сообщения другим участникам чата
+
+Сервер хранит активные клиентские подключения и имена пользователей, принимает сообщения от клиентов и рассылает их всем остальным участникам
+
+Также реализована команда выхода из чата:
+
+```text
+/exit
+```
+
+После выхода клиента его соединение закрывается, а остальные пользователи получают сообщение о том, что он покинул чат
+
+Для работы использовались:
+
+- `AF_INET` — использование IPv4
+- `SOCK_STREAM` — использование протокола TCP
+- `threading` — создание отдельных потоков для одновременной работы с несколькими клиентами
+- IP-адрес `127.0.0.1`
+- порт `5004`
+
+
+### Использование потоков
+
+Для реализации многопользовательского режима используется библиотека `threading`
+
+Основной поток сервера продолжает ожидать новые подключения, а для каждого подключившегося клиента создаётся отдельный поток
+
+Это позволяет серверу одновременно работать с несколькими пользователями
+
+Схематично работа сервера выглядит следующим образом:
+
+```text
+Основной поток сервера
+        |
+        |---- принимает Kira
+        |         |
+        |         └── отдельный поток Kira
+        |
+        |---- принимает Maksim
+        |         |
+        |         └── отдельный поток Maksim
+        |
+        └---- продолжает ждать новые подключения
+```
+
+### Серверная часть
+
+Сервер создаёт TCP-сокет, связывает его с IP-адресом и портом с помощью `bind()` и переводит в режим ожидания подключений методом `listen()`
+
+Для хранения подключённых пользователей используются два списка:
+
+```python
+clients = []
+usernames = []
+```
+
+В список `clients` сохраняются клиентские сокеты, а в `usernames` — соответствующие им имена пользователей
+
+Функция `broadcast()` используется для рассылки сообщения всем подключённым пользователям, кроме отправителя
+
+Для каждого клиента создаётся отдельный поток, выполняющий функцию `handle_client()`. Она постоянно ожидает сообщения от конкретного пользователя и передаёт их другим участникам чата
+
+При отключении пользователя его сокет и имя удаляются из списков, после чего остальные клиенты получают сообщение о выходе пользователя
+
+Код сервера:
+
+```python
+import socket
+import threading
+
+server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+server_address = ("127.0.0.1", 5004)
+server_socket.bind(server_address)
+
+server_socket.listen()
+
+clients = []
+usernames = []
+
+
+def broadcast(message, sender_socket):
+    for client in clients:
+        if client != sender_socket:
+            client.send(message)
+
+
+def handle_client(client_socket):
+    while True:
+        try:
+            message = client_socket.recv(1024)
+
+            if not message:
+                break
+
+            broadcast(message, client_socket)
+
+        except:
+            break
+
+    if client_socket in clients:
+        index = clients.index(client_socket)
+
+        clients.remove(client_socket)
+        username = usernames[index]
+        usernames.remove(username)
+
+        client_socket.close()
+
+        leave_message = f"{username} left the chat.".encode()
+        broadcast(leave_message, client_socket)
+
+
+def receive_clients():
+    while True:
+        client_socket, client_address = server_socket.accept()
+
+        client_socket.send("USERNAME".encode())
+        username = client_socket.recv(1024).decode()
+
+        clients.append(client_socket)
+        usernames.append(username)
+
+        print(f"{username} connected.")
+
+        join_message = f"{username} joined the chat.".encode()
+        broadcast(join_message, client_socket)
+
+        thread = threading.Thread(
+            target=handle_client,
+            args=(client_socket,)
+        )
+        thread.start()
+
+
+print("Server is running...")
+receive_clients()
+```
+
+### Работа функции `broadcast()`
+
+Функция:
+
+```python
+def broadcast(message, sender_socket):
+    for client in clients:
+        if client != sender_socket:
+            client.send(message)
+```
+
+перебирает все активные клиентские подключения
+
+Условие:
+
+```python
+if client != sender_socket:
+```
+
+проверяет, что сообщение не отправляется обратно пользователю, который его написал
+
+### Обработка клиента
+
+Функция:
+
+```python
+handle_client()
+```
+
+работает в отдельном потоке для каждого подключённого клиента
+
+В цикле:
+
+```python
+message = client_socket.recv(1024)
+```
+
+сервер ожидает сообщения пользователя
+
+Если данные получены, сообщение передаётся функции:
+
+```python
+broadcast()
+```
+
+которая рассылает его другим клиентам
+
+Если соединение закрывается или возникает ошибка, цикл завершается, пользователь удаляется из списка активных клиентов, а его сокет закрывается
+
+### Подключение новых пользователей
+
+Функция:
+
+```python
+receive_clients()
+```
+
+постоянно ожидает новые соединения методом:
+
+```python
+server_socket.accept()
+```
+
+После подключения сервер отправляет клиенту специальное сообщение:
+
+```text
+USERNAME
+```
+
+Клиент в ответ передаёт введённое пользователем имя
+
+После этого сервер сохраняет сокет и имя:
+
+```python
+clients.append(client_socket)
+usernames.append(username)
+```
+
+и запускает новый поток:
+
+```python
+thread = threading.Thread(
+    target=handle_client,
+    args=(client_socket,)
+)
+
+thread.start()
+```
+
+Таким образом, каждый клиент обрабатывается независимо от остальных пользователей
+
+### Клиентская часть
+
+Клиент создаёт TCP-сокет и подключается к серверу методом `connect()`
+
+После запуска пользователь вводит своё имя
+
+Для клиента также используется отдельный поток. Он постоянно принимает сообщения от сервера, пока основной поток программы позволяет пользователю вводить новые сообщения
+
+Если от сервера приходит сообщение:
+
+```text
+USERNAME
+```
+
+клиент отправляет введённое имя пользователя
+
+Все остальные сообщения выводятся в терминал
+
+При вводе команды:
+
+```text
+/exit
+```
+
+клиент закрывает соединение с сервером и завершает работу
+
+Код клиента:
+
+```python
+import socket
+import threading
+
+client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+server_address = ("127.0.0.1", 5004)
+client_socket.connect(server_address)
+
+username = input("Enter username: ")
+
+
+def receive_messages():
+    while True:
+        try:
+            message = client_socket.recv(1024).decode()
+
+            if message == "USERNAME":
+                client_socket.send(username.encode())
+            else:
+                print(message)
+
+        except:
+            print("Connection closed.")
+            client_socket.close()
+            break
+
+
+def send_messages():
+    while True:
+        message = input()
+
+        if message == "/exit":
+            client_socket.close()
+            break
+
+        full_message = f"{username}: {message}"
+        client_socket.send(full_message.encode())
+
+
+receive_thread = threading.Thread(target=receive_messages)
+receive_thread.start()
+
+send_messages()
+```
+
+### Параллельная работа клиента
+
+У клиента одновременно выполняются две задачи:
+
+```text
+Основной поток
+    |
+    └── ввод и отправка сообщений
+
+Дополнительный поток
+    |
+    └── получение сообщений от сервера
+```
+
+Функция:
+
+```python
+send_messages()
+```
+
+позволяет пользователю вводить сообщения
+
+Функция:
+
+```python
+receive_messages()
+```
+
+работает в отдельном потоке и принимает сообщения от сервера
+
+Благодаря этому клиент может получать новые сообщения, даже если пользователь в данный момент ничего не вводит
+
+### Результат выполнения
+
+Для проверки многопользовательского режима были запущены один сервер и два экземпляра одного и того же клиентского приложения
+
+![Результат работы многопользовательского чата](images/chat.png)
+
+Таким образом, был реализован многопользовательский TCP-чат. Один сервер одновременно обслуживает несколько клиентов с помощью потоков, пользователи идентифицируются по имени, могут обмениваться сообщениями и корректно выходить из чата
