@@ -203,5 +203,127 @@ S = 5 * 3 = 15
 
 Клиент получил от сервера результат `15.0`
 
-![Результат вычисления площади параллелограмма через TCP](images/tcp_calculation.png)
+![Результат обмена сообщениями по UDP](images/tcp_calculation.png)
 
+## Задание 3. Раздача HTML-страницы по HTTP
+
+### Описание
+
+В третьем задании реализован простой HTTP-сервер с использованием библиотеки `socket`
+
+В качестве клиента используется браузер. При переходе по адресу `http://127.0.0.1:5003` браузер устанавливает TCP-соединение с сервером и отправляет HTTP-запрос
+
+Пример первой строки запроса:
+
+```text
+GET / HTTP/1.1
+```
+
+Здесь:
+
+- `GET` — HTTP-метод для получения ресурса;
+- `/` — путь к запрашиваемому ресурсу;
+- `HTTP/1.1` — версия протокола HTTP.
+
+Сервер получает запрос, читает HTML-страницу из файла `index.html`, формирует HTTP-ответ и отправляет его браузеру
+
+HTTP-ответ состоит из строки статуса, заголовков, пустой строки и тела ответа
+
+Схема взаимодействия:
+
+
+### HTML-страница
+
+Содержимое страницы хранится в отдельном файле `index.html`
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Socket HTTP Server</title>
+</head>
+<body>
+    <h1>Hello from socket server!</h1>
+    <p>This page was sent using Python sockets and HTTP.</p>
+</body>
+</html>
+```
+
+### Серверная часть
+
+Сервер создаёт TCP-сокет с помощью `AF_INET` и `SOCK_STREAM`, связывает его с локальным IP-адресом и портом методом `bind()` и начинает ожидать подключение методом `listen()`
+
+После подключения браузера метод `accept()` принимает соединение и создаёт отдельный сокет для взаимодействия с клиентом
+
+HTTP-запрос браузера принимается методом `recv()` и выводится в терминал
+
+Затем сервер открывает файл `index.html`, считывает его содержимое и преобразует HTML-код в байты
+
+Для корректного HTTP-ответа формируются следующие заголовки:
+
+- `HTTP/1.1 200 OK` — запрос успешно обработан;
+- `Content-Type: text/html; charset=utf-8` — тело ответа содержит HTML-страницу в кодировке UTF-8;
+- `Content-Length` — размер тела ответа в байтах.
+
+Между HTTP-заголовками и телом ответа добавляется пустая строка
+
+Код сервера:
+
+```python
+import socket
+
+server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+server_address = ("127.0.0.1", 5003)
+server_socket.bind(server_address)
+
+server_socket.listen()
+
+client_socket, client_address = server_socket.accept()
+
+request = client_socket.recv(1024)
+print(request.decode())
+
+with open("index.html", "r", encoding="utf-8") as file:
+    html = file.read()
+
+html_bytes = html.encode("utf-8")
+content_length = len(html_bytes)
+
+response_headers = (
+    "HTTP/1.1 200 OK\r\n"
+    "Content-Type: text/html; charset=utf-8\r\n"
+    f"Content-Length: {content_length}\r\n"
+    "\r\n"
+)
+
+response = response_headers.encode("utf-8") + html_bytes
+
+client_socket.sendall(response)
+
+client_socket.close()
+server_socket.close()
+```
+
+### Результат выполнения
+
+Сервер был запущен на локальном адресе:
+
+```text
+http://127.0.0.1:5003
+```
+
+После перехода по данному адресу браузер отправил серверу HTTP GET-запрос
+
+В терминале сервера был получен запрос, содержащий строку:
+
+```text
+GET / HTTP/1.1
+```
+
+Сервер загрузил содержимое файла `index.html`, сформировал HTTP-ответ и передал HTML-страницу браузеру
+
+Браузер успешно отобразил полученную страницу
+
+![Результат работы HTTP-сервера](images/http_page.png)
